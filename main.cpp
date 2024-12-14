@@ -8,8 +8,8 @@
 
 
 
-// #include <ilcplex/cplex.h>
-// #include <ilcplex/ilocplex.h>
+ #include <ilcplex/cplex.h>
+ #include <ilcplex/ilocplex.h>
 
 
 using namespace std;
@@ -40,168 +40,202 @@ using namespace std;
 
 void writeLpFile(string file) {
 
-    // string conflFile = "pfclp/h2_w24_58_all.confl";
-    string conflFile = "pfclp/" + file + ".confl";
-    ifstream f(conflFile);
+    string datFile = "pfclp/" + file + ".dat";
 
-    ofstream file_stream;
-    string lpFile = ("lps/" + file + ".lp");
+    cout << datFile << endl;
 
+    ifstream f(datFile);
 
-
-    // Check if the file is successfully opened
     if (!f.is_open()) {
-        cerr << "Error opening the file!";
+        cerr << "Error opening the input file!";
+        return;
     }
+
+    string lpFile = "lps/" + file + ".lp";
+    cout << lpFile<< endl;
+
     string s;
+    getline(f, s);//primeira linha em branco
     getline(f, s);
     int N = stoi(s);
     getline(f, s);
     int P = stoi(s);
 
-    s = "N: " + to_string(N) + "\nP: " + to_string(P);
-    cout << s << endl;
+    // Tenta abrir o arquivo
+    ofstream file_stream(lpFile, ios::out | ios::trunc); // Abre para escrever do zero
+    if (!file_stream.is_open()) {
+        cerr << "Error opening the output file: " << lpFile << endl;
+        return;
+    }
+    cout << "Reading File: " << datFile << "\nN: " << N << "\nP: " << P << endl;
+    file_stream << "Maximize\n obj:";
+    file_stream.close();
 
+    vector<vector<vector<vector<int>>>> conflicts(N, vector<vector<vector<int>>>(P, vector<vector<int>>(N, vector<int>(P, 0))));
 
-    string x = "x";
-    string z = "z";
-
-    string out = "Maximize\n";
-    out = out + " obj: ";
-    string temp = "";
-    vector<vector<float>> w(N, vector<float>(P, 0)); // Preenchida com 0
-    vector<vector<vector<vector<int>>>> conflicts(N, vector<vector<vector<int>>>(P, vector<vector<int>>(N, vector<int>(P, 0)))); // Preenchida com 0
-
-    // For each point (N)
     for (int i = 0; i < N; i++) {
-        // For each label (P)
         for (int k = 0; k < P; k++) {
             getline(f, s);
             int J = stoi(s);
-            //cout << "Label " << k + 1 << " tem " << J << " conflitos." << endl;
             getline(f, s);
-            stringstream ss(s); // stringstream to read the pairs
-            // For each conflicts (J)
+            stringstream ss(s);
             for (int j = 0; j < J; j++) {
                 int id;
-                float distance;
-                // read each pair (id, distance)
-                ss >> id >> distance;
-                w[id / P][id % P] += distance;
-                // Define the conflict between xi,j and xt,u
+                ss >> id;
+                id -= 1;
                 conflicts[i][k][id / P][id % P] = 1;
                 conflicts[id / P][id % P][i][k] = 1;
-                // cout << "id = " << id << ", Distance = " << distance << endl;
             }
-            // Ignore this line
-            getline(f, s);
         }
     }
 
+    int counter = 0; // Contador para monitorar o progresso
+
+    // Maximization terms
+    file_stream.open(lpFile, ios::out | ios::app); // Reabre o arquivo em modo append
+    if (!file_stream.is_open()) {
+        cerr << "Error opening the output file!";
+        return;
+    }
+    
+    
+    //file_stream.seekp(-3, ios_base::cur); // Remove o �ltimo " + "
     for (int i = 0; i < N; i++) {
+        file_stream << " - z" << i;
+    }
+    file_stream << " + " + to_string(N);
+
+    file_stream << "\nSubject To\n";
+    file_stream.close();
+
+    // Constraints
+    counter = 0;
+    file_stream.open(lpFile, ios::out | ios::app);
+    if (!file_stream.is_open()) {
+        cerr << "Error opening the output file!";
+        return;
+    }
+
+    for (int i = 0; i < N; i++) {
+        file_stream << " c" << i << ": ";
         for (int j = 0; j < P; j++) {
-            // cout << "matriz[" << i << "][" << j << "] = " << w[i][j] << endl;
-            temp = temp + to_string(w[i][j]) + " " + x + to_string(i) + to_string(j) + "\n+ ";
-
+            if (j != P - 1) {
+                file_stream << "x" << i << j << " + ";
+            }
+            else {
+                file_stream << "x" << i << j;
+            }
+            if (++counter % 100000 == 0) {
+                file_stream.close();
+                file_stream.open(lpFile, ios::out | ios::app);
+            }
         }
-    }
-
-    // Remove the last " + " in the temp string
-    temp.pop_back();
-    temp.pop_back();
-    temp.pop_back();
-
-    for (int i = 0; i < N; i++) {
-        temp = temp + " - " + z + to_string(i);
-    }
-
-
-    out = out + temp + "\nSubject To\n";
-    temp = "";
-
-
-    for (int i = 0; i < N; i++) {
-        temp = temp + " c" + to_string(i) + ": ";
-        for (int j = 0; j < P; j++) {
-            temp = temp + x + to_string(i) + to_string(j) + " + ";
-        }
-        temp.pop_back();
-        temp.pop_back();
-        temp.pop_back();
-        temp = temp + " = 1\n";
+        file_stream << " = 1\n";
     }
 
     int constraint_id = N;
-    out = out + temp;
-    temp = "";
+
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < P; j++) {
             for (int t = 0; t < N; t++) {
                 for (int u = 0; u < P; u++) {
                     if (conflicts[i][j][t][u] == 1 && i != t) {
-                        temp = temp + " c" + to_string(constraint_id) + ": " + x + to_string(i) + to_string(j) + " + " + x + to_string(t) + to_string(u) + " - " + z + to_string(i) + " <= 1\n";
-                        constraint_id += 1;
+                        file_stream << " c" << constraint_id++ << ": "
+                            << "x" << i << j << " + "
+                            << "x" << t << u << " - "
+                            << "z" << i << " <= 1\n";
+                        if (++counter % 100000 == 0) {
+                            file_stream.close();
+                            file_stream.open(lpFile, ios::out | ios::app);
+                        }
                     }
                 }
             }
-
         }
     }
-    out = out + temp;
+    file_stream << "Binary\n";
 
-    temp = "Binary\n";
-    for (int i = 0; i < N; i++){
-        for (int j = 0; j < P; j++){
-            temp = temp + " x" + to_string(i) + to_string(j) + "\n";
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < P; j++) {
+            file_stream << " x" << i << j << "\n";
+            if (++counter % 100000 == 0) {
+                file_stream.close();
+                file_stream.open(lpFile, ios::out | ios::app);
+            }
         }
-            temp = temp + " z" + to_string(i)+ "\n";
+        file_stream << " z" << i << "\n";
     }
-    
-    out = out + temp + "End";
 
-    
-    file_stream.open(lpFile);
-    file_stream << out;
+    file_stream << "End";
     file_stream.close();
+
     cout << "Arquivo salvo" << endl;
 }
 
 
-int solveLpFile(const char *lpFile){
-    // // Create the CPLEX enviroment
-    // IloEnv env;
 
-    // // Create the model and solver
-    // IloModel model(env);
-    // IloCplex cplex(env);
+#include <ilcplex/ilocplex.h>
+#include <iostream>
+#include <string>
+#include <exception>
 
-    // IloObjective   obj;
-    // IloNumVarArray var(env);
-    // IloRangeArray  rng(env);
+int solveLpFile(string lpFile) {
+    lpFile = "lps/" + lpFile + ".lp";
+    try {
+        IloEnv env;
+        IloModel model(env);
+        IloCplex cplex(env);
 
-    // cout << "created" << endl;
-    // // Import the model of LP file
-    // cplex.importModel(model, lpFile, obj, var, rng);
-    // cout << "created" << endl;
+        IloObjective obj;
+        IloNumVarArray var(env);
+        IloRangeArray rng(env);
 
-    ////// Use the model loaded in solver
-    //cplex.extract(model);
+        // Define o limite de tempo para 1 hora (3600 segundos)
+        cplex.setParam(IloCplex::Param::TimeLimit, 3600);
 
-    //if (!cplex.solve()) {
-    //    env.error() << "Failed to optimize LP" << endl;
-    //    throw(-1);
-    //}
+        // Importa o modelo
+        cplex.importModel(model, lpFile.c_str(), obj, var, rng);
+        cplex.extract(model);
 
-    //IloNumArray vals(env);
-    //cplex.getValues(vals, var);
-    //env.out() << "Solution status = " << cplex.getStatus() << endl;
-    //env.out() << "Solution value  = " << cplex.getObjValue() << endl;
-    //env.out() << "Solution vector = " << vals << endl;
+        // Resolve o problema
+        if (!cplex.solve()) {
+            env.error() << "Failed to optimize LP" << std::endl;
+            cerr << ("Failed to solve the problem.");
+        }
 
-    //// Finaliza o ambiente
-    //env.end();
+        // Obter o Lower Bound (LB) e Upper Bound (UB) da função objetivo
+        double lowerBound = cplex.getBestObjValue();
+        double upperBound = cplex.getObjValue();
 
-    return 0;
+        // Calcula o Gap
+        double gap = 0.0;
+        if (lowerBound != 0.0) { // Evitar divisão por zero
+            gap = ((upperBound - lowerBound) / std::abs(lowerBound)) * 100;
+        }
+
+        // Exibe os resultados
+        env.out() << "Solution status = " << cplex.getStatus() << std::endl;
+        env.out() << "Objective value (UB)  = " << upperBound << std::endl;
+        env.out() << "Best bound (LB)       = " << lowerBound << std::endl;
+        env.out() << "Gap                   = " << gap << "%" << std::endl;
+
+        IloNumArray vals(env);
+        cplex.getValues(vals, var);
+        env.out() << "Solution status = " << cplex.getStatus() << std::endl;
+        env.out() << "Solution value  = " << cplex.getObjValue() << std::endl;
+        //env.out() << "Solution vector = " << vals << std::endl;
+
+        env.end();
+        return 0; // Sucesso
+    }
+    catch (IloException& e) {
+        std::cerr << "Error: " << e.getMessage() << std::endl;
+        return 1; // Erro no CPLEX
+    }
+    catch (...) {
+        std::cerr << "Unknown error occurred!" << std::endl;
+        return 2; // Outro erro
+    }
 }
 
 
@@ -216,45 +250,24 @@ int solveLpFile(const char *lpFile){
 
 
 
-int main() {
+
+int main(int argc, char* argv[]) {
     //long long currentTimeMs = getSystemTimeMsec();
-    //forcing the slow to count the time
-    // for (int i = 0; i < 10000; i++){
-    //     for (int j = 0; j < 100000; j++){
-    //         cout << "";
-    //     }
-    // }
-
-
-
-
-
-    // write the LP file with file
-    string file = "h2_w24_505_all";
-    writeLpFile(file);
-
-
-    // Load the LP file
-    //  const char* file = "lp.lp";
-     //Solve LP file
-     //solveLpFile(file);
-
-    
-
-    
-
-
-
-
     //long long afterTime = getSystemTimeMsec();
+    //std::cout << "Total time: " << (afterTime - currentTimeMs) / 1000 << "seconds" << std::endl;
 
 
-    //std::cout << "\n\npreviousTimeMs: " << currentTimeMs << std::endl;
-    //std::cout << "currentTimeMs: " << afterTime << std::endl;
 
-    //std::cout << "total seconds: " << (afterTime - currentTimeMs) / 1000 << "seconds" << std::endl;
+    string fileName = argv[1];
+    // write the LP file with .dat file
+    //string fileName = "d1000_24";
+    writeLpFile(fileName);
+
+
+    //Solve LP file
+    solveLpFile(fileName);
+
 
     getchar();  // wait for keyboard input
+    return 0;
 }
-
-
