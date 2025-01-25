@@ -179,8 +179,12 @@ void writeLpFile(string file) {
 #include <string>
 #include <exception>
 
-int solveLpFile(string lpFile) {
-    lpFile = "lps/" + lpFile + ".lp";
+
+#include "gurobi_c++.h"
+#include <cmath>
+
+int solveLpFileCplex(string lpFile) {
+    string lpPath = "lps/" + lpFile + ".lp";
     try {
         IloEnv env;
         IloModel model(env);
@@ -194,7 +198,7 @@ int solveLpFile(string lpFile) {
         cplex.setParam(IloCplex::Param::TimeLimit, 3600);
 
         // Importa o modelo
-        cplex.importModel(model, lpFile.c_str(), obj, var, rng);
+        cplex.importModel(model, lpPath.c_str(), obj, var, rng);
         cplex.extract(model);
 
         // Resolve o problema
@@ -225,6 +229,8 @@ int solveLpFile(string lpFile) {
         env.out() << "Solution value  = " << cplex.getObjValue() << std::endl;
         //env.out() << "Solution vector = " << vals << std::endl;
 
+        string solPath = "sol/CPLEX/" + lpFile + ".sol";
+        cplex.writeSolution(solPath.c_str());
         env.end();
         return 0; // Sucesso
     }
@@ -239,6 +245,69 @@ int solveLpFile(string lpFile) {
 }
 
 
+int solveLpFileGurobi(std::string lpFile) {
+    std::string lpPath = "lps/" + lpFile + ".lp";
+
+    try {
+        // Inicializar o ambiente do Gurobi
+        GRBEnv env = GRBEnv(true);
+        env.start();
+
+        // Criar um modelo vazio
+        GRBModel model = GRBModel(env);
+
+        // Importar o modelo LP
+        model.read(lpPath);
+
+        // Configurar o limite de tempo (1 hora = 3600 segundos)
+        model.set(GRB_DoubleParam_TimeLimit, 3600);
+
+        // Otimizar o modelo
+        model.optimize();
+
+        // Verificar o status da solução
+        int status = model.get(GRB_IntAttr_Status);
+
+        if (status == GRB_OPTIMAL || status == GRB_SUBOPTIMAL) {
+            // Obter o valor do objetivo (Upper Bound)
+            double upperBound = model.get(GRB_DoubleAttr_ObjVal);
+
+            // Obter o melhor limite inferior (Lower Bound)
+            double lowerBound = model.get(GRB_DoubleAttr_ObjBound);
+
+            // Calcular o Gap
+            double gap = 0.0;
+            if (lowerBound != 0.0) { // Evitar divisão por zero
+                gap = ((upperBound - lowerBound) / std::abs(lowerBound)) * 100;
+            }
+
+            // Exibir resultados
+            std::cout << "Solution status = " << status << std::endl;
+            std::cout << "Objective value (UB) = " << upperBound << std::endl;
+            std::cout << "Best bound (LB)      = " << lowerBound << std::endl;
+            std::cout << "Gap                  = " << gap << "%" << std::endl;
+
+            // Salvar solução em um arquivo
+            std::string solPath = "sol/GUROBI/" + lpFile + ".sol";
+            model.write(solPath);
+
+            return 0; // Sucesso
+        }
+        else {
+            std::cerr << "Failed to optimize LP. Status code: " << status << std::endl;
+            return 1; // Falha ao resolver o problema
+        }
+    }
+    catch (GRBException& e) {
+        std::cerr << "Gurobi Error Code: " << e.getErrorCode() << std::endl;
+        std::cerr << e.getMessage() << std::endl;
+        return 2; // Erro específico do Gurobi
+    }
+    catch (...) {
+        std::cerr << "Unknown error occurred!" << std::endl;
+        return 3; // Outro erro
+    }
+}
 
 
 
@@ -265,7 +334,8 @@ int main(int argc, char* argv[]) {
 
 
     //Solve LP file
-    solveLpFile(fileName);
+    solveLpFileCplex(fileName);
+    //solveLpFileGurobi(fileName);
 
 
     getchar();  // wait for keyboard input

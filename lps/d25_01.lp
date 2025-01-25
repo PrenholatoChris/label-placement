@@ -552,7 +552,7 @@ Subject To
  c548: x243 + x73 - z24 <= 1
  c549: x243 + x180 - z24 <= 1
  c550: x243 + x181 - z24 <= 1
-Binary
+Binaries
  x00
  x01
  x02
