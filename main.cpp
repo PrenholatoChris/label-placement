@@ -4,74 +4,289 @@
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <algorithm>
+#include <chrono>  // For time tracking
+#include <cstdlib> // For atoi, atof
+#include <filesystem>  
 
-
-
-
- #include <ilcplex/cplex.h>
- #include <ilcplex/ilocplex.h>
-
+#define P 4
 
 using namespace std;
+using namespace std::chrono;
 
-//#if !defined(_WIN32) && !defined(_WIN64) // Linux - Unix
-//#  include <sys/time.h>
-//typedef timeval sys_time_t;
-//inline void system_time(sys_time_t* t) {
-//    gettimeofday(t, NULL);
-//}
-//inline long long time_to_msec(const sys_time_t& t) {
-//    return t.tv_sec * 1000LL + t.tv_usec / 1000;
-//}
-//#else // Windows and MinGW
-//#  include <sys/timeb.h>
-//typedef _timeb sys_time_t;
-//inline void system_time(sys_time_t* t) { _ftime(t); }
-//inline long long time_to_msec(const sys_time_t& t) {
-//    return t.time * 1000LL + t.millitm;
-//}
-//#endif
+class Conflict {
+    int n_x;
+    int n_y;
 
-//long long getSystemTimeMsec() {
-//    sys_time_t t;
-//    system_time(&t);
-//    return time_to_msec(t);
-//}
+    int p_x;
+    int p_y;
+    public: Conflict(int index_i, int index_j) {
+        n_x = index_i / P;
+        n_y = index_j / P;
 
-void writeLpFile(string file) {
+        p_x = index_i % P;
+        p_y = index_j % P;
+    }
+    
+    int get_point(bool x=false) {
+        if (x) {
+            return this->n_x;
+        }
+        return this->n_y;
+    }
 
-    string datFile = "pfclp/" + file + ".dat";
+    int get_pos(bool x = false) {
+        if (x) {
+            return this->p_x;
+        }
+        return this->p_y;
+    }
 
-    cout << datFile << endl;
+    void print() {
+        cout << "[" + to_string(n_x) + "," + to_string(p_x) + "]" + "![" + to_string(n_y) + "," + to_string(p_y) + "]" << endl;
+    }
 
-    ifstream f(datFile);
+};
+
+void print_conflicts(vector<Conflict*> conflicts) {
+    int size = conflicts.size();
+    for (int i = 0; i < size; i++)
+    {
+        Conflict* conflict = conflicts.at(i);
+        conflict->print();
+
+    }
+}
+
+
+
+
+
+class Solution {
+public:
+    static int N;
+    static vector<Conflict*> conflicts;
+
+
+    int FO;
+    vector <int> sol;
+
+    Solution(){
+        for (int i = 0; i < this->N; i++){
+            int pos = rand() % P;
+            sol.push_back(pos);
+        }
+        totalConflicts();
+    }
+
+    Solution(vector <int> sol) {
+        this->sol = sol;
+        totalConflicts();
+    }
+
+    void print() {
+        cout << "Sol (" + to_string(this->FO) +") = [" + to_string(this->sol[0]);
+        for (int i = 1; i < this->N; i++)
+        {
+            cout << ", " + to_string(this->sol[i]);
+        }
+        cout << "]" << endl;
+
+    }
+
+    int totalConflicts(bool print = false) {
+        int total = 0;
+        for (int i = 0; i < this->conflicts.size(); i++){
+            Conflict* conflict = this->conflicts.at(i);
+            int n_x = conflict->get_point(true);
+            int n_y = conflict->get_point();
+            int p_x = conflict->get_pos(true);
+            int p_y = conflict->get_pos();
+            if (sol.at(n_x) == p_x and sol.at(n_y) == p_y){
+                if (print) {
+                    cout << "conflito entre:(" + to_string(n_x) + "," + to_string(p_x) + ") e (" + to_string(n_y) + "," + to_string(p_y) + ")" << endl;
+                    /*break;*/
+                }
+                total++;
+            }
+        }
+        this->FO = N - total;
+        return total;
+    }
+
+};
+
+
+// Comparator function
+bool compareByFO(Solution* a, Solution* b) {
+    return a->FO > b->FO;  // Correct comparison for highest to lowest FO
+}
+
+void insertSorted(vector<Solution*>& Pop, Solution* newSol, int maxPopSize) {
+    // Ensure the population is sorted in descending order by FO before insertion
+
+    auto it = upper_bound(Pop.begin(), Pop.end(), newSol, compareByFO);
+    Pop.insert(it, newSol);  // Insert the new solution in the correct position
+
+    // If population size exceeds the max allowed size, remove the solution with the lowest FO
+    if (Pop.size() > maxPopSize) {
+        //delete Pop.back();  // Free memory before removing
+        Pop.pop_back();
+    }
+}
+
+void insertSolinPop(vector<Solution*>& Pop, Solution* newSol, int maxPopSize) {
+    
+    Pop.push_back(newSol);
+
+    sort(Pop.begin(), Pop.end(), compareByFO);
+
+    if (Pop.size() > maxPopSize) {
+        Pop.pop_back();
+    }
+    
+}
+
+vector<Solution*> createRandPop(int amount, int max_pop) {
+    vector<Solution*> Pop;
+    for (int i = 0; i < amount; i++){
+        insertSolinPop(Pop, new Solution(), max_pop);
+        //insertSorted(Pop, new Solution(), amount);
+    }
+    return Pop;
+}
+
+
+void print_vector(vector<int> v) {
+    cout << "size=" + to_string(v.size()) << endl;
+    cout << "[" + to_string(v.at(0));
+    for (int i = 1; i < v.size(); i++) {
+        cout << ", " + to_string(v.at(i));
+    }
+    cout << "]" << endl;
+}
+
+
+
+
+
+Solution* getSolFromPop(const vector<Solution*>& Pop, bool selectBest = false) {
+    if (Pop.empty()) return nullptr;  // Safety check
+
+    if (selectBest) {
+        // Select a random solution from the top 10%
+        int topPercentage = max(1, (int)(0.1 * Pop.size()));
+        return Pop[rand() % topPercentage]; // Pop is already sorted
+    }
+
+    // Otherwise, return a completely random solution
+    return Pop[rand() % Pop.size()];
+}
+
+
+
+
+vector<int> getHalfSol(int init, int N, Solution* sol) {
+    vector<int> half;
+    for (int i = init; i < N; i++){
+        half.push_back(sol->sol.at(i));
+    }
+    return half;
+}
+
+
+
+void crossover(Solution* sol1, Solution* sol2, vector<int>& result) {
+    int mid = (int)sol1->sol.size() / 2;
+    vector<int> a, b;
+    if (rand() % 2 == 0) {
+        // Take the first half from sol1 and second half from sol2
+        a = getHalfSol(0, mid, sol1);
+        b = getHalfSol(mid, sol2->sol.size(), sol2);
+    }
+    else {
+        // Take the first half from sol2 and second half from sol1
+        a = getHalfSol(0, mid, sol2);
+        b = getHalfSol(mid, sol1->sol.size(), sol1);
+    }
+
+    // Merge `a` and `b` into `result`
+    result.clear();  // Ensure `result` is empty before inserting
+    result.insert(result.end(), a.begin(), a.end());
+    result.insert(result.end(), b.begin(), b.end());
+}
+
+
+
+void mutate(vector<int>& v, float mutation_rate) {
+    for (int& gene : v) {
+        if ((float)rand() / RAND_MAX < mutation_rate) { // Use `<` for better probability handling
+            gene = rand() % P; // Generates a number between 0 and 3
+        }
+    }
+}
+
+
+void randGenetic(int AG, vector<Solution*>& Pop, int maxPopSize, int crossings, float mutation_rate, int teste) {
+    Solution* bestSol = getSolFromPop(Pop, true);  // Best solution starts as a reference (no extra allocation)
+
+    vector<int> crossVector;  // Preallocate crossover vector
+
+    for (int ag = 0; ag < AG; ag++) {
+        Solution* sol1 = getSolFromPop(Pop, true);
+        Solution* sol2 = getSolFromPop(Pop);
+
+        for (int i = 0; i < crossings; i++) {
+            crossover(sol1, sol2, crossVector);  // Modify crossVector in-place
+
+            // Mutation with proper probability
+            mutate(crossVector, mutation_rate);
+
+            Solution* crossSol = new Solution(crossVector);
+
+            // Update best solution without allocating new memory
+            if (crossSol->FO > bestSol->FO) {
+                bestSol = crossSol;  // Just update pointer reference
+            }
+
+            insertSolinPop(Pop, crossSol, maxPopSize);  // Insert and maintain population sizes
+        }
+
+    }
+}
+
+void read_file(string fileName, int &N, vector<Conflict*> &conflicts) {
+
+    //cout << "Reading " + fileName << endl;
+
+    vector <int> instance(2, 0);
+
+    ifstream f(fileName);
 
     if (!f.is_open()) {
         cerr << "Error opening the input file!";
-        return;
+        return ;
     }
 
-    string lpFile = "lps/" + file + ".lp";
-    cout << lpFile<< endl;
 
     string s;
     getline(f, s);//primeira linha em branco
     getline(f, s);
-    int N = stoi(s);
-    getline(f, s);
-    int P = stoi(s);
+    N = stoi(s);
 
-    // Tenta abrir o arquivo
-    ofstream file_stream(lpFile, ios::out | ios::trunc); // Abre para escrever do zero
-    if (!file_stream.is_open()) {
-        cerr << "Error opening the output file: " << lpFile << endl;
-        return;
+
+    if (N == 0) {
+        cerr << "N not filled!";
     }
-    cout << "Reading File: " << datFile << "\nN: " << N << "\nP: " << P << endl;
-    file_stream << "Maximize\n obj:";
-    file_stream.close();
 
-    vector<vector<vector<vector<int>>>> conflicts(N, vector<vector<vector<int>>>(P, vector<vector<int>>(N, vector<int>(P, 0))));
+    getline(f, s);
+    int p = stoi(s);
+
+    if (p != P) {
+        exit;
+    }
+
+    //cout << "N:" + to_string(N) + " P:" + to_string(p) << endl;
 
     for (int i = 0; i < N; i++) {
         for (int k = 0; k < P; k++) {
@@ -83,261 +298,146 @@ void writeLpFile(string file) {
                 int id;
                 ss >> id;
                 id -= 1;
-                conflicts[i][k][id / P][id % P] = 1;
-                conflicts[id / P][id % P][i][k] = 1;
+                
+                conflicts.push_back(new Conflict((i*P)+k, id));
             }
         }
     }
+    return ;
+}
 
-    int counter = 0; // Contador para monitorar o progresso
+//int index_x = 8;
+//int index_y = 1;
+//Conflict* teste = new Conflict(index_x, index_y, 25, 4);
+//teste->printar_conflito();
 
-    // Maximization terms
-    file_stream.open(lpFile, ios::out | ios::app); // Reabre o arquivo em modo append
-    if (!file_stream.is_open()) {
-        cerr << "Error opening the output file!";
+
+
+
+int Solution::N = 0;  // Definition and initialization
+vector<Conflict*> Solution::conflicts;// Definition and initialization
+
+
+
+
+
+
+
+
+void saveBestSolutionToFile(Solution* best, const string& inputFilePath) {
+    // Criar diretório "sol" se não existir
+    //filesystem::create_directory("sol");
+
+    // Extrair apenas o nome do arquivo sem o caminho
+    // Encontrar a última ocorrência de '/'
+    size_t lastSlash = inputFilePath.find_last_of("/\\");
+   string fileName = (lastSlash == string::npos) ? inputFilePath : inputFilePath.substr(lastSlash + 1);
+
+
+    // Substituir extensão ".dat" por ".sol"
+    size_t pos = fileName.find(".dat");
+    if (pos !=string::npos) {
+        fileName.replace(pos, 4, ".sol");  // Troca ".dat" por ".sol"
+    }
+    else {
+        fileName += ".sol";  // Caso não tenha ".dat", adiciona ".sol"
+    }
+
+    // Criar caminho final dentro da pasta "sol"
+   string outputFilePath = "sol/" + fileName;
+
+   ofstream outFile(outputFilePath);
+    if (!outFile) {
+       cerr << "Error while opening file for write!" <<endl;
         return;
     }
-    
-    
-    //file_stream.seekp(-3, ios_base::cur); // Remove o ï¿½ltimo " + "
-    for (int i = 0; i < N; i++) {
-        file_stream << " - z" << i;
+
+    // Escreve os dados no arquivo
+    outFile << "FO = " << best->FO << "\n";
+    outFile << "Solution:\n";
+    for (int val : best->sol) {
+        outFile << val << " ";
     }
-    file_stream << " + " + to_string(N);
+    outFile << "\n";
 
-    file_stream << "\nSubject To\n";
-    file_stream.close();
-
-    // Constraints
-    counter = 0;
-    file_stream.open(lpFile, ios::out | ios::app);
-    if (!file_stream.is_open()) {
-        cerr << "Error opening the output file!";
-        return;
-    }
-
-    for (int i = 0; i < N; i++) {
-        file_stream << " c" << i << ": ";
-        for (int j = 0; j < P; j++) {
-            if (j != P - 1) {
-                file_stream << "x" << i << j << " + ";
-            }
-            else {
-                file_stream << "x" << i << j;
-            }
-            if (++counter % 100000 == 0) {
-                file_stream.close();
-                file_stream.open(lpFile, ios::out | ios::app);
-            }
-        }
-        file_stream << " = 1\n";
-    }
-
-    int constraint_id = N;
-
-    for (int i = 0; i < N; i++) {
-        for (int j = 0; j < P; j++) {
-            for (int t = 0; t < N; t++) {
-                for (int u = 0; u < P; u++) {
-                    if (conflicts[i][j][t][u] == 1 && i != t) {
-                        file_stream << " c" << constraint_id++ << ": "
-                            << "x" << i << j << " + "
-                            << "x" << t << u << " - "
-                            << "z" << i << " <= 1\n";
-                        if (++counter % 100000 == 0) {
-                            file_stream.close();
-                            file_stream.open(lpFile, ios::out | ios::app);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    file_stream << "Binary\n";
-
-    for (int i = 0; i < N; i++) {
-        for (int j = 0; j < P; j++) {
-            file_stream << " x" << i << j << "\n";
-            if (++counter % 100000 == 0) {
-                file_stream.close();
-                file_stream.open(lpFile, ios::out | ios::app);
-            }
-        }
-        file_stream << " z" << i << "\n";
-    }
-
-    file_stream << "End";
-    file_stream.close();
-
-    cout << "Arquivo salvo" << endl;
+    outFile.close();
+   cout << "Solution saved in : " << outputFilePath <<endl;
 }
-
-
-
-#include <ilcplex/ilocplex.h>
-#include <iostream>
-#include <string>
-#include <exception>
-
-
-#include "gurobi_c++.h"
-#include <cmath>
-
-int solveLpFileCplex(string lpFile) {
-    string lpPath = "lps/" + lpFile + ".lp";
-    try {
-        IloEnv env;
-        IloModel model(env);
-        IloCplex cplex(env);
-
-        IloObjective obj;
-        IloNumVarArray var(env);
-        IloRangeArray rng(env);
-
-        // Define o limite de tempo para 1 hora (3600 segundos)
-        cplex.setParam(IloCplex::Param::TimeLimit, 3600);
-
-        // Importa o modelo
-        cplex.importModel(model, lpPath.c_str(), obj, var, rng);
-        cplex.extract(model);
-
-        // Resolve o problema
-        if (!cplex.solve()) {
-            env.error() << "Failed to optimize LP" << std::endl;
-            cerr << ("Failed to solve the problem.");
-        }
-
-        // Obter o Lower Bound (LB) e Upper Bound (UB) da funÃ§Ã£o objetivo
-        double lowerBound = cplex.getBestObjValue();
-        double upperBound = cplex.getObjValue();
-
-        // Calcula o Gap
-        double gap = 0.0;
-        if (lowerBound != 0.0) { // Evitar divisÃ£o por zero
-            gap = ((upperBound - lowerBound) / std::abs(lowerBound)) * 100;
-        }
-
-        // Exibe os resultados
-        env.out() << "Solution status = " << cplex.getStatus() << std::endl;
-        env.out() << "Objective value (UB)  = " << upperBound << std::endl;
-        env.out() << "Best bound (LB)       = " << lowerBound << std::endl;
-        env.out() << "Gap                   = " << gap << "%" << std::endl;
-
-        IloNumArray vals(env);
-        cplex.getValues(vals, var);
-        env.out() << "Solution status = " << cplex.getStatus() << std::endl;
-        env.out() << "Solution value  = " << cplex.getObjValue() << std::endl;
-        //env.out() << "Solution vector = " << vals << std::endl;
-
-        string solPath = "sol/CPLEX/" + lpFile + ".sol";
-        cplex.writeSolution(solPath.c_str());
-        env.end();
-        return 0; // Sucesso
-    }
-    catch (IloException& e) {
-        std::cerr << "Error: " << e.getMessage() << std::endl;
-        return 1; // Erro no CPLEX
-    }
-    catch (...) {
-        std::cerr << "Unknown error occurred!" << std::endl;
-        return 2; // Outro erro
-    }
-}
-
-
-int solveLpFileGurobi(std::string lpFile) {
-    std::string lpPath = "lps/" + lpFile + ".lp";
-
-    try {
-        // Inicializar o ambiente do Gurobi
-        GRBEnv env = GRBEnv(true);
-        env.start();
-
-        // Criar um modelo vazio
-        GRBModel model = GRBModel(env);
-
-        // Importar o modelo LP
-        model.read(lpPath);
-
-        // Configurar o limite de tempo (1 hora = 3600 segundos)
-        model.set(GRB_DoubleParam_TimeLimit, 3600);
-
-        // Otimizar o modelo
-        model.optimize();
-
-        // Verificar o status da soluÃ§Ã£o
-        int status = model.get(GRB_IntAttr_Status);
-
-        if (status == GRB_OPTIMAL || status == GRB_SUBOPTIMAL) {
-            // Obter o valor do objetivo (Upper Bound)
-            double upperBound = model.get(GRB_DoubleAttr_ObjVal);
-
-            // Obter o melhor limite inferior (Lower Bound)
-            double lowerBound = model.get(GRB_DoubleAttr_ObjBound);
-
-            // Calcular o Gap
-            double gap = 0.0;
-            if (lowerBound != 0.0) { // Evitar divisÃ£o por zero
-                gap = ((upperBound - lowerBound) / std::abs(lowerBound)) * 100;
-            }
-
-            // Exibir resultados
-            std::cout << "Solution status = " << status << std::endl;
-            std::cout << "Objective value (UB) = " << upperBound << std::endl;
-            std::cout << "Best bound (LB)      = " << lowerBound << std::endl;
-            std::cout << "Gap                  = " << gap << "%" << std::endl;
-
-            // Salvar soluÃ§Ã£o em um arquivo
-            std::string solPath = "sol/GUROBI/" + lpFile + ".sol";
-            model.write(solPath);
-
-            return 0; // Sucesso
-        }
-        else {
-            std::cerr << "Failed to optimize LP. Status code: " << status << std::endl;
-            return 1; // Falha ao resolver o problema
-        }
-    }
-    catch (GRBException& e) {
-        std::cerr << "Gurobi Error Code: " << e.getErrorCode() << std::endl;
-        std::cerr << e.getMessage() << std::endl;
-        return 2; // Erro especÃ­fico do Gurobi
-    }
-    catch (...) {
-        std::cerr << "Unknown error occurred!" << std::endl;
-        return 3; // Outro erro
-    }
-}
-
-
-
-
-
-
-
-
 
 
 
 
 int main(int argc, char* argv[]) {
-    //long long currentTimeMs = getSystemTimeMsec();
-    //long long afterTime = getSystemTimeMsec();
-    //std::cout << "Total time: " << (afterTime - currentTimeMs) / 1000 << "seconds" << std::endl;
-
-
+    if (argc < 7) {
+        cerr << "Usage: " << argv[0] << " <fileName> <total_generations> <initial_pop> <max_pop> <total_crossings> <mutation_rate> <time_limit>" << endl;
+        return 1;
+    }
 
     string fileName = argv[1];
-    // write the LP file with .dat file
-    //string fileName = "d1000_24";
-    writeLpFile(fileName);
+    int total_generations = atoi(argv[2]);
+    int initial_pop = atoi(argv[3]);
+    int max_pop = atoi(argv[4]);
+    int total_crossings = atoi(argv[5]);
+    float mutation_rate = atof(argv[6]);
+    int time_limit = atoi(argv[7]); // New parameter: Time limit in seconds
+    bool limited = false;
 
+    int N = 0;
+    vector<Conflict*> conflicts;
+    read_file(fileName, N, conflicts);
 
-    //Solve LP file
-    solveLpFileCplex(fileName);
-    //solveLpFileGurobi(fileName);
+    Solution::N = N;
+    Solution::conflicts = conflicts;
 
+    vector<Solution*> Pop = createRandPop(initial_pop, max_pop);
 
-    getchar();  // wait for keyboard input
+    auto start_time = high_resolution_clock::now();
+    auto current_time = high_resolution_clock::now();
+    auto elapsed_time = duration_cast<seconds>(current_time - start_time).count();
+
+    Solution* best = nullptr;
+    //Use heuristic
+    if (true) {
+
+        for (int generation = 0; generation < total_generations; generation++) {
+            randGenetic(1, Pop, max_pop, total_crossings, mutation_rate, generation);  // Run 1 generation at a time
+        
+            // Check elapsed time
+            auto current_time = high_resolution_clock::now();
+            auto elapsed_time = duration_cast<seconds>(current_time - start_time).count();
+
+            if (elapsed_time >= time_limit) {
+                limited = true;
+                break;  // Stop execution if time is exceeded
+            }
+        }
+        
+        best = Pop.at(0);
+        cout << best->FO << endl;
+
+    }
+
+    //print solution
+    if (true) {
+        best = Pop.at(0);
+        if (limited) {
+            cout << "Time limit reached (" << elapsed_time << "s)." << endl;
+        }
+        else {
+            current_time = high_resolution_clock::now();
+            elapsed_time = duration_cast<seconds>(current_time - start_time).count();
+            cout << "Elapsed time (" << elapsed_time << "s)." << endl;
+        }
+
+        cout << "Best solution found : FO = " << best->FO << endl;
+
+        // Chamar a função passando o nome do arquivo de entrada como parâmetro
+        saveBestSolutionToFile(best, fileName);
+
+    }
+
     return 0;
 }
+
+
+

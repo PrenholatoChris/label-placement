@@ -1,0 +1,5 @@
+total_generations  "" i   (5000, 10000)
+initial_pop       ""  i   (200, 500)
+max_pop          "" i   (200, 500)
+total_crossings   ""  i   (10, 500)
+mutation_rate     ""  r   (0, 1.0)
